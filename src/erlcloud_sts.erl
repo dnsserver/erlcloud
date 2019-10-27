@@ -9,6 +9,7 @@
 -endif.
 
 -export([assume_role/4, assume_role/5,
+         assume_role_with_web_identity/6,
          get_caller_identity/1,
          get_federation_token/3,
          get_federation_token/4]).
@@ -63,6 +64,42 @@ assume_role(AwsConfig, RoleArn, RoleSessionName, DurationSeconds, ExternalId)
     {AssumedConfig, Creds}.
 
 
+% See https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html
+-spec assume_role_with_web_identity(#aws_config{}, string(), string(), 900..43200, string(), string()) -> {#aws_config{}, proplist()} | no_return().
+assume_role_with_web_identity(AwsConfig, RoleArn, RoleSessionName, DurationSeconds, ProviderId, WebIdentityToken)
+    when length(RoleArn) >= 20,
+         length(RoleSessionName) >= 2, length(RoleSessionName) =< 64,
+         DurationSeconds >= 900, DurationSeconds =< 43200 ->
+
+    Params =
+        [
+            {"RoleArn", RoleArn},
+            {"RoleSessionName", RoleSessionName},
+            {"DurationSeconds", DurationSeconds},
+            {"WebIdentityToken", WebIdentityToken},
+            {"ProviderId", ProviderId}
+        ],
+
+    Xml = sts_query(AwsConfig, "AssumeRoleWithWebIdentity", Params),
+
+    Creds = erlcloud_xml:decode(
+        [
+            {access_key_id    , "AssumeRoleWithWebIdentityResult/Credentials/AccessKeyId"    , text},
+            {secret_access_key, "AssumeRoleWithWebIdentityResult/Credentials/SecretAccessKey", text},
+            {session_token    , "AssumeRoleWithWebIdentityResult/Credentials/SessionToken"   , text},
+            {expiration       , "AssumeRoleWithWebIdentityResult/Credentials/Expiration"     , time}
+        ],
+        Xml),
+    ExpireTS = expiration_tosecs( proplists:get_value(expiration, Creds) ),
+    AssumedConfig =
+        AwsConfig#aws_config {
+            access_key_id     = proplists:get_value(access_key_id, Creds),
+            secret_access_key = proplists:get_value(secret_access_key, Creds),
+            security_token    = proplists:get_value(session_token, Creds),
+            expiration        = ExpireTS
+        },
+
+    {AssumedConfig, Creds}.
 
 %% @doc Retrieve identity information
 %%
